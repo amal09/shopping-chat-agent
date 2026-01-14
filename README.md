@@ -19,10 +19,6 @@ Built with **Next.js (App Router)**, **TypeScript**, **Google Gemini**, and a **
   - Responses are grounded to catalog data
   - No hallucinated specs (the agent only uses what exists in the dataset)
 
-- **Follow-up Awareness**
-  - Supports follow-up questions like: **“I like this phone, tell me more”**
-  - Uses prior context via `usedCatalogIds` to keep the conversation consistent
-
 - **Safety & Adversarial Handling**
   - Refuses prompt-injection attempts (system prompt / API key / internal logic)
   - Rejects irrelevant / toxic requests
@@ -76,7 +72,7 @@ Built with **Next.js (App Router)**, **TypeScript**, **Google Gemini**, and a **
 ### 1) Clone & Install
 
 ```bash
-git clone <your-github-repo-url>
+gh repo clone amal09/shopping-chat-agent
 cd shopping-chat-agent
 npm install
 ```
@@ -87,8 +83,7 @@ Create `.env.local` in the project root:
 
 ```env
 GEMINI_API_KEY=your_actual_gemini_api_key_here
-# Optional:
-# GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
 > ✅ Do **not** commit `.env.local`  
@@ -173,8 +168,9 @@ shopping-chat-agent/
 3. Server pipeline:
    - **Safety gate** blocks unsafe/irrelevant requests.
    - **Intent parsing** extracts budget/brand/features.
-   - **Retrieval** finds candidate phones from the catalog.
+   - **Catalog retrieval** filters and scores phones.
    - **LLM generation** formats a structured response (validated with Zod).
+   - **Schema validation** ensures predictable output.
    - **Fallback** returns deterministic responses if the model fails (quota/invalid JSON/etc.).
 
 ### Grounding Strategy
@@ -220,12 +216,17 @@ Catalog file: `src/data/phones.json`
 
 `searchCatalog()`:
 - Applies **hard filters** first (budget, brand, OS).
-- Scores candidates based on:
-  - budget fit
-  - feature matches (camera/battery/charging/compact/display/performance)
-  - rating (if present)
-- Sorts and returns top N.
-
+- Hard fileter:
+  - budget 
+  - brand 
+  - os
+- Weighted scoring
+  - camera quality (tags + OIS)
+  - battery size
+  - charging speed
+  - compactness
+- display smoothness
+  - Sorts and returns top N.
 ---
 
 ## 🔁 Fallback Behavior (Resilience)
@@ -268,24 +269,23 @@ Fallback responses still:
 
 ## 🧩 Known Limitations
 
-- Catalog is JSON-based (not a real DB yet), so scaling is limited
+- Phone Catalog is JSON-based (not a real DB yet), so scaling is limited
 - Performance/gaming intent relies on tags as proxy (no chipset benchmarks)
 - Prices are approximate (not live store pricing)
 - Free-tier Gemini quotas may cause fallback responses more often
+- No long-term memory across sessions
+- Follow-up conversational context is intentionally limited to keep logic deterministic
 
 ---
 
 ## 📸 Screenshots & Demo (Optional)
 
 ### Screenshots
-Store screenshots in `docs/screenshots/` and add:
+Store screenshots in `docs/screenshots/` 
 
-```md
-![Chat UI](docs/screenshots/chat-ui.png)
-```
 
 ### Demo Video
-Add your video link in the **Live Demo** section.
+video link here 👉 link
 
 ---
 
