@@ -32,9 +32,13 @@ const FEATURE_KEYWORDS: Record<PhoneFeature, string[]> = {
 function parseBudgetInr(text: string): number | undefined {
   const t = normalize(text);
 
-  // Examples:
-  // "under ₹30,000" | "below 30000" | "under 30k" | "around 15k"
-  // First try explicit ₹ amount with commas
+   // Handle ₹25k, ₹30K, ₹30,000
+  const rupeeWithK = t.match(/₹\s*(\d{1,3})\s*k\b/i);
+  if (rupeeWithK?.[1]) {
+    const num = Number(rupeeWithK[1]) * 1000;
+    if (Number.isFinite(num) && num > 0) return num;
+  }
+
   const rupeeMatch = t.match(/₹\s*([0-9][0-9,]*)/);
   if (rupeeMatch?.[1]) {
     const num = Number(rupeeMatch[1].replace(/,/g, ""));

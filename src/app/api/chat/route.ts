@@ -19,6 +19,22 @@ function inferMode(userText: string): "recommend" | "compare" | "explain" {
   return "recommend";
 }
 
+function extractJsonObject(text: string): string {
+  const s = (text || "").trim();
+
+  // Handle ```json ... ```
+  const fenced = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) return fenced[1].trim();
+
+  // Otherwise, try grabbing the first {...} block
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start >= 0 && end > start) return s.slice(start, end + 1);
+
+  return s;
+}
+
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as ChatRequestBody;
@@ -66,21 +82,31 @@ export async function POST(req: Request) {
 
     // 4) Call Gemini + validate output; fallback on ANY failure
     try {
+      console.log("[chat] modeHint:", modeHint);
+      console.log("[chat] candidates:", candidates.map(c => c.id));
+
       const model = getGeminiModel();
       const resp = await model.generateContent(prompt);
       const text = resp.response.text().trim();
+      const jsonText = extractJsonObject(text);
 
       let parsedJson: unknown;
       try {
-        parsedJson = JSON.parse(text);
+        parsedJson = JSON.parse(jsonText);
       } catch {
+        console.log("[chat] fallback: invalid JSON from model");
+        console.log("[chat] raw (first 300):", text.slice(0, 300));
         return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
       }
 
+
+
       const validated = ChatResponseSchema.safeParse(parsedJson);
       if (!validated.success) {
+        console.log("[chat] fallback: schema validation failed", validated.error.issues);
         return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
       }
+
 
       // Always inject usedCatalogIds for traceability (even if model forgot it)
       const finalResponse = {
@@ -91,8 +117,9 @@ export async function POST(req: Request) {
       };
 
       return NextResponse.json(finalResponse);
-    } catch {
+    } catch(e: any) {
       // Gemini API error (quota/rate-limit/network/etc.)
+      console.log("[chat] fallback: Gemini call failed", e?.message || e);
       return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
     }
   } catch (err: any) {
