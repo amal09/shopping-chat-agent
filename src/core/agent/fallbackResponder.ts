@@ -15,6 +15,22 @@ function toCard(p: Phone) {
   };
 }
 
+function toDetailBullets(p: Phone): string[] {
+  return [
+    p.summary || "From our catalog",
+    `OS: ${p.os}`,
+    p.displayInches ? `Display: ${p.displayInches}"` : "Display not listed",
+    p.refreshRateHz ? `Refresh: ${p.refreshRateHz}Hz` : "Refresh not listed",
+    p.batteryMah ? `Battery: ${p.batteryMah} mAh` : "Battery not listed",
+    p.chargingW ? `Charging: ${p.chargingW}W` : "Charging not listed",
+    p.hasOis === true
+      ? "Camera stabilization: OIS"
+      : p.hasOis === false
+      ? "Camera stabilization: OIS not listed"
+      : "Camera stabilization not listed"
+  ];
+}
+
 export function buildFallbackResponse(args: {
   modeHint: "recommend" | "compare" | "explain";
   userMessage: string;
@@ -22,15 +38,35 @@ export function buildFallbackResponse(args: {
 }): ChatResponse {
   const { modeHint, candidates } = args;
 
+  // ✅ EXPLAIN ALWAYS WINS (no product cards)
   if (modeHint === "explain") {
     return {
       mode: "explain",
       message:
-        "OIS (Optical Image Stabilization) reduces blur using physical stabilization of the camera lens/sensor. EIS (Electronic Image Stabilization) stabilizes using software by adjusting/cropping frames. OIS helps more for low-light photos and handheld shots; EIS is commonly used for smoother video. (Fallback response: model unavailable.)",
-      usedCatalogIds: candidates.map((p) => p.id)
+        "OIS (Optical Image Stabilization) physically stabilizes the camera lens or sensor to reduce blur—especially useful for low-light photos and handheld shots. EIS (Electronic Image Stabilization) uses software to stabilize by cropping or adjusting frames—commonly used for smoother video. Many phones use both: OIS for capture quality, EIS for video smoothness.",
+      usedCatalogIds: []
     };
   }
 
+  // ✅ SINGLE PHONE → DETAILS (deterministic follow-up)
+  if (candidates.length === 1) {
+    const p = candidates[0];
+    return {
+      mode: "explain",
+      message: `More details about ${p.brand} ${p.model}. (Fallback: model temporarily unavailable.)`,
+      products: [
+        {
+          id: p.id,
+          title: `${p.brand} ${p.model}`,
+          priceInr: p.priceInr,
+          highlights: toDetailBullets(p)
+        }
+      ],
+      usedCatalogIds: [p.id]
+    };
+  }
+
+  // ✅ COMPARE
   if (modeHint === "compare") {
     const top = candidates.slice(0, 3);
     return {
@@ -47,14 +83,14 @@ export function buildFallbackResponse(args: {
           { label: "Refresh Rate", values: top.map((p) => (p.refreshRateHz ? `${p.refreshRateHz}Hz` : "N/A")) },
           { label: "Battery", values: top.map((p) => (p.batteryMah ? `${p.batteryMah} mAh` : "N/A")) },
           { label: "Charging", values: top.map((p) => (p.chargingW ? `${p.chargingW}W` : "N/A")) },
-          { label: "OIS", values: top.map((p) => (p.hasOis === true ? "Yes" : p.hasOis === false ? "No" : "N/A")) }
+          { label: "OIS", values: top.map((p) => (p.hasOis === true ? "Yes" : "No")) }
         ]
       },
       usedCatalogIds: top.map((p) => p.id)
     };
   }
 
-  // recommend
+  // ✅ RECOMMEND
   const top = candidates.slice(0, 3);
   return {
     mode: "recommend",

@@ -17,10 +17,22 @@ type ChatRequestBody = {
 
 function inferMode(userText: string): "recommend" | "compare" | "explain" {
   const t = userText.toLowerCase();
-  if (t.includes("compare") || t.includes("vs")) return "compare";
-  if (t.includes("explain") || t.includes("what is") || t.includes("difference")) return "explain";
+
+  // Explain should have highest priority
+  if (
+    t.includes("explain") ||
+    t.includes("what is") ||
+    t.includes("difference") ||
+    t.includes("ois") ||
+    t.includes("eis")
+  ) return "explain";
+
+  // Compare next
+  if (t.includes("compare") || t.includes(" vs ") || t.includes("vs")) return "compare";
+
   return "recommend";
 }
+
 
 function extractJsonObject(text: string): string {
   const s = (text || "").trim();
