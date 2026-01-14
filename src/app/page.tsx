@@ -1,20 +1,18 @@
-import { CatalogJsonRepo } from "@/core/catalog/catalogJsonRepo";
-import SearchDemo from "./SearchDemo";
-import ApiTester from "./ApiTester";
+import ChatShell from "@/components/Chat/ChatShell";
 
-export default async function Home() {
-  const repo = new CatalogJsonRepo();
-  const phones = await repo.getAllPhones();
-
+export default function Home() {
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui", maxWidth: 900, margin: "0 auto" }}>
-      <h1>Shopping Chat Agent</h1>
-      <p style={{ opacity: 0.8 }}>
-        Commit 5: /api/chat with Gemini (grounded) + schema validation
-      </p>
+    <main style={{ padding: 20, fontFamily: "system-ui", maxWidth: 980, margin: "0 auto" }}>
+      <header style={{ marginBottom: 12 }}>
+        <h1 style={{ margin: 0 }}>Shopping Chat Agent</h1>
+        <p style={{ marginTop: 8, opacity: 0.75 }}>
+          Ask for recommendations, comparisons, or feature explanations (grounded to our catalog).
+        </p>
+      </header>
 
-      <SearchDemo phones={phones} />
-      <ApiTester />
+      <div style={{ border: "1px solid #eee", borderRadius: 14 }}>
+        <ChatShell />
+      </div>
     </main>
   );
 }
