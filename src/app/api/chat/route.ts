@@ -64,6 +64,41 @@ export async function POST(req: Request) {
 
     // If nothing matched, ask a clarifying question (no AI needed)
     if (candidates.length === 0) {
+      // If user asked for brand + budget, give nearest brand options slightly above budget
+      if (parsed.budgetInr && parsed.brandIncludes?.length) {
+        const all = await repo.getAllPhones();
+        const brand = parsed.brandIncludes[0].toLowerCase();
+
+        const brandPhones = all
+          .filter((p) => p.brand.toLowerCase() === brand)
+          .sort((a, b) => a.priceInr - b.priceInr);
+
+        if (brandPhones.length > 0) {
+          const cheapest = brandPhones[0];
+
+          // show "nearest" brand option above budget (like A55 at 29999)
+          return NextResponse.json({
+            mode: "clarify",
+            message: `I couldn’t find any ${parsed.brandIncludes[0]} phones under ₹${parsed.budgetInr.toLocaleString("en-IN")} in the current catalog. The closest option is ${cheapest.brand} ${cheapest.model} at ₹${cheapest.priceInr.toLocaleString("en-IN")}. If you want, I can also suggest the best alternatives under your budget.`,
+            products: [
+              {
+                id: cheapest.id,
+                title: `${cheapest.brand} ${cheapest.model}`,
+                priceInr: cheapest.priceInr,
+                highlights: [
+                  cheapest.summary || "Closest match from our catalog",
+                  cheapest.hasOis ? "OIS available" : "OIS not listed",
+                  cheapest.batteryMah ? `Battery: ${cheapest.batteryMah} mAh` : "Battery not listed",
+                  cheapest.chargingW ? `Charging: ${cheapest.chargingW}W` : "Charging not listed"
+                ]
+              }
+            ],
+            usedCatalogIds: [cheapest.id]
+          });
+        }
+      }
+
+      // Default fallback (no brand or no phones at all)
       return NextResponse.json({
         mode: "clarify",
         message:
