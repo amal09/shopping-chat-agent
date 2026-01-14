@@ -1,6 +1,7 @@
 import type { Phone } from "../types/phone";
 import type { CatalogRepo } from "./catalogRepo";
 import type { ParsedQuery } from "./queryParser";
+import { getWeightsFromIntent, scorePhone as scorePhoneByWeights } from "./scoring";
 
 export interface SearchResult {
   phone: Phone;
@@ -8,16 +9,35 @@ export interface SearchResult {
   reasons: string[]; // human-readable reasons for ranking
 }
 
-function scorePhone(phone: Phone, q: ParsedQuery): { score: number; reasons: string[] } {
+function scoreWithReasons(phone: Phone, q: ParsedQuery): { score: number; reasons: string[] } {
   let score = 0;
   const reasons: string[] = [];
 
-  // Budget: prefer phones well under budget (but still close to budget is okay)
+  // -----------------------------
+  // (A) Option A weights-based score (from scoring.ts)
+  // -----------------------------
+  const weights = getWeightsFromIntent({
+    budgetInr: q.budgetInr,
+    features: q.features
+  });
+
+  const weightedScore = scorePhoneByWeights(phone, weights);
+  if (weightedScore > 0) {
+    score += weightedScore;
+    reasons.push("Matches your priorities");
+  }
+
+  // -----------------------------
+  // (B) Existing deterministic scoring + reasons
+  // -----------------------------
+
+  // Budget: prefer phones within budget (and slightly prefer closer to budget)
   if (q.budgetInr) {
     if (phone.priceInr <= q.budgetInr) {
       score += 10;
       reasons.push("Within budget");
-      const closeness = 1 - (q.budgetInr - phone.priceInr) / q.budgetInr; // closer to budget slightly better
+
+      const closeness = 1 - (q.budgetInr - phone.priceInr) / q.budgetInr; // closer is slightly better
       score += Math.max(0, Math.min(3, closeness * 3));
     }
   }
@@ -45,7 +65,6 @@ function scorePhone(phone: Phone, q: ParsedQuery): { score: number; reasons: str
 
       case "battery":
         if (phone.batteryMah) {
-          // Rough scoring: 4500+ decent, 5000+ good, 5500+ excellent
           if (phone.batteryMah >= 5500) {
             score += 6;
             reasons.push("Excellent battery size");
@@ -98,7 +117,7 @@ function scorePhone(phone: Phone, q: ParsedQuery): { score: number; reasons: str
 
       case "performance":
       case "gaming":
-        // We don't have chipset info yet; use rating/tags as proxy (transparent limitation)
+        // we don't have chipset info yet; use tags as proxy
         if (phone.tags?.includes("performance")) {
           score += 4;
           reasons.push("Performance-oriented");
@@ -114,9 +133,13 @@ function scorePhone(phone: Phone, q: ParsedQuery): { score: number; reasons: str
   // Slight boost for curated rating if present
   if (typeof phone.rating === "number") {
     score += Math.max(0, Math.min(3, (phone.rating - 3.5) * 2));
+    reasons.push("Good overall rating");
   }
 
-  return { score, reasons };
+  // De-duplicate reasons (so UI doesn't repeat similar lines)
+  const uniqueReasons = Array.from(new Set(reasons));
+
+  return { score: Number(score.toFixed(2)), reasons: uniqueReasons };
 }
 
 export async function searchCatalog(
@@ -144,7 +167,7 @@ export async function searchCatalog(
 
   // Score and rank
   const scored = filtered.map((phone) => {
-    const { score, reasons } = scorePhone(phone, q);
+    const { score, reasons } = scoreWithReasons(phone, q);
     return { phone, score, reasons };
   });
 
