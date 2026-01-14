@@ -6,6 +6,7 @@ import { evaluateSafety } from "@/core/agent/safety";
 import { buildAgentPrompt } from "@/core/agent/prompt";
 import { getGeminiModel } from "@/core/agent/geminiClient";
 import { ChatResponseSchema } from "@/core/agent/responseSchema";
+import { buildFallbackResponse } from "@/core/agent/fallbackResponder";
 
 type ChatRequestBody = {
   message: string;
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3) Gemini: explain + format structured JSON (grounded)
+    // 3) Gemini prompt (grounded)
     const modeHint = inferMode(message);
     const prompt = buildAgentPrompt({
       userMessage: message,
@@ -63,64 +64,39 @@ export async function POST(req: Request) {
       candidatePhones: candidates
     });
 
-    const model = getGeminiModel();
-    const resp = await model.generateContent(prompt);
-    const text = resp.response.text().trim();
-
-    // 4) Parse + validate Gemini JSON (critical)
-    let parsedJson: unknown;
+    // 4) Call Gemini + validate output; fallback on ANY failure
     try {
-      parsedJson = JSON.parse(text);
+      const model = getGeminiModel();
+      const resp = await model.generateContent(prompt);
+      const text = resp.response.text().trim();
+
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(text);
+      } catch {
+        return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
+      }
+
+      const validated = ChatResponseSchema.safeParse(parsedJson);
+      if (!validated.success) {
+        return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
+      }
+
+      // Always inject usedCatalogIds for traceability (even if model forgot it)
+      const finalResponse = {
+        ...validated.data,
+        usedCatalogIds: validated.data.usedCatalogIds?.length
+          ? validated.data.usedCatalogIds
+          : candidates.map((p) => p.id)
+      };
+
+      return NextResponse.json(finalResponse);
     } catch {
-      // fallback if Gemini didn't return proper JSON
-      return NextResponse.json({
-        mode: "recommend",
-        message:
-          "Here are some options from our catalog. (Note: response formatting fallback due to invalid model output.)",
-        products: candidates.slice(0, 3).map((p) => ({
-          id: p.id,
-          title: `${p.brand} ${p.model}`,
-          priceInr: p.priceInr,
-          highlights: [
-            p.summary || "Good all-round option",
-            p.hasOis ? "OIS available" : "OIS not listed in catalog",
-            p.batteryMah ? `Battery: ${p.batteryMah} mAh` : "Battery not listed"
-          ]
-        })),
-        usedCatalogIds: candidates.map((p) => p.id)
-      });
+      // Gemini API error (quota/rate-limit/network/etc.)
+      return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
     }
-
-    const validated = ChatResponseSchema.safeParse(parsedJson);
-    if (!validated.success) {
-      return NextResponse.json({
-        mode: "recommend",
-        message:
-          "Here are some options from our catalog. (Note: schema fallback due to unexpected model output.)",
-        products: candidates.slice(0, 3).map((p) => ({
-          id: p.id,
-          title: `${p.brand} ${p.model}`,
-          priceInr: p.priceInr,
-          highlights: [
-            p.summary || "Good all-round option",
-            p.hasOis ? "OIS available" : "OIS not listed in catalog",
-            p.chargingW ? `Charging: ${p.chargingW}W` : "Charging not listed"
-          ]
-        })),
-        usedCatalogIds: candidates.map((p) => p.id)
-      });
-    }
-
-    // Always inject usedCatalogIds for traceability (even if model forgot it)
-    const finalResponse = {
-      ...validated.data,
-      usedCatalogIds: validated.data.usedCatalogIds?.length
-        ? validated.data.usedCatalogIds
-        : candidates.map((p) => p.id)
-    };
-
-    return NextResponse.json(finalResponse);
   } catch (err: any) {
+    // Errors in request parsing, catalog loading, etc.
     return NextResponse.json(
       {
         mode: "clarify",
