@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function MessageInput({
   onSend,
@@ -10,6 +10,11 @@ export default function MessageInput({
   disabled: boolean;
 }) {
   const [text, setText] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!disabled) inputRef.current?.focus();
+  }, [disabled]);
 
   function submit() {
     const value = text.trim();
@@ -19,34 +24,20 @@ export default function MessageInput({
   }
 
   return (
-    <div style={{ display: "flex", gap: 10 }}>
+    <div className="row">
       <input
+        ref={inputRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
         disabled={disabled}
         placeholder='Try: "Best camera phone under ₹25k"'
-        style={{
-          flex: 1,
-          padding: 12,
-          borderRadius: 10,
-          border: "1px solid #ddd"
-        }}
+        className="textInput"
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) submit();
         }}
       />
 
-      <button
-        onClick={submit}
-        disabled={disabled}
-        style={{
-          padding: "12px 16px",
-          borderRadius: 10,
-          border: "1px solid #ddd",
-          background: disabled ? "#eee" : "#fff",
-          cursor: disabled ? "not-allowed" : "pointer"
-        }}
-      >
+      <button onClick={submit} disabled={disabled} className="btn">
         Send
       </button>
     </div>
