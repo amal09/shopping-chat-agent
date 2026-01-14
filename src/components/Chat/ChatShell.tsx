@@ -26,20 +26,29 @@ export default function ChatShell() {
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setLoading(true);
 
+    const payload = {
+      messages: messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role, content: m.content }))
+        .concat([{ role: "user", content: trimmed }])
+    };
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed })
+        body: JSON.stringify(payload)
       });
 
       const data = (await res.json()) as ChatResponse;
+      const marker =
+        data.usedCatalogIds?.length ? `\n[catalog_ids:${data.usedCatalogIds.join(",")}]` : "";
 
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: data.message || "Here are the results.",
+          content: (data.message || "Here are the results.") + marker,
           response: data
         }
       ]);

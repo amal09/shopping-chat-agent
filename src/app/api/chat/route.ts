@@ -7,9 +7,12 @@ import { buildAgentPrompt } from "@/core/agent/prompt";
 import { getGeminiModel } from "@/core/agent/geminiClient";
 import { ChatResponseSchema } from "@/core/agent/responseSchema";
 import { buildFallbackResponse } from "@/core/agent/fallbackResponder";
+import type { ChatMessage } from "@/core/types/chat";
+import { extractLastUsedCatalogIds, getLastUserMessage, looksLikeFollowUp } from "@/core/agent/context";
+import { extractVsPair, resolvePhoneByName } from "@/core/catalog/phoneResolver";
 
 type ChatRequestBody = {
-  message: string;
+  messages: ChatMessage[];
 };
 
 function inferMode(userText: string): "recommend" | "compare" | "explain" {
@@ -38,7 +41,9 @@ function extractJsonObject(text: string): string {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as ChatRequestBody;
-    const message = (body?.message || "").trim();
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const message = getLastUserMessage(messages);
+
 
     if (!message) {
       return NextResponse.json(
@@ -62,7 +67,21 @@ export async function POST(req: Request) {
     const results = await searchCatalog(repo, parsed, 5);
     const candidates = results.map((r) => r.phone);
 
-    // If nothing matched, ask a clarifying question (no AI needed)
+    // Follow-up handling: "this phone / tell me more"
+    // If user asks follow-up and we have last used IDs, narrow candidates to that set.
+    if (looksLikeFollowUp(message)) {
+      const lastIds = extractLastUsedCatalogIds(messages);
+      if (lastIds.length) {
+        const all = await repo.getAllPhones();
+        const narrowed = all.filter((p) => lastIds.includes(p.id));
+        if (narrowed.length) {
+          // override candidates with last shown phones
+          candidates.splice(0, candidates.length, ...narrowed);
+        }
+      }
+    }
+
+    // If nothing matched,
     if (candidates.length === 0) {
       // If user asked for brand + budget, give nearest brand options slightly above budget
       if (parsed.budgetInr && parsed.brandIncludes?.length) {
@@ -107,13 +126,27 @@ export async function POST(req: Request) {
       });
     }
 
+    // If message is "A vs B", resolve to exact phones from catalog
+    const allPhones = await repo.getAllPhones();
+    const pair = extractVsPair(message);
+    if (pair) {
+      const left = resolvePhoneByName(allPhones, pair.left);
+      const right = resolvePhoneByName(allPhones, pair.right);
+      if (left && right) {
+        candidates.splice(0, candidates.length, left, right);
+      }
+    }
+    
+
     // 3) Gemini prompt (grounded)
     const modeHint = inferMode(message);
     const prompt = buildAgentPrompt({
       userMessage: message,
       modeHint,
-      candidatePhones: candidates
+      candidatePhones: candidates,
+      history: messages
     });
+
 
     // 4) Call Gemini + validate output; fallback on ANY failure
     try {

@@ -34,7 +34,7 @@ export default function MessageList({
               lineHeight: 1.4
             }}
           >
-            {m.content}
+            {m.content.replace(/\n?\[catalog_ids:[^\]]+\]\s*$/i, "")}
           </div>
 
           {/* Render structured results if assistant message includes response */}

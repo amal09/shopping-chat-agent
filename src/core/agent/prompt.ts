@@ -1,11 +1,18 @@
 import type { Phone } from "../types/phone";
+import type { ChatMessage } from "../types/chat";
 
 export function buildAgentPrompt(args: {
   userMessage: string;
   modeHint: "recommend" | "compare" | "explain";
   candidatePhones: Phone[];
+  history?: ChatMessage[];
 }): string {
   const { userMessage, modeHint, candidatePhones } = args;
+
+  const history = (args.history || [])
+  .slice(-8) // keep last few to limit tokens
+  .map((m) => ({ role: m.role, content: m.content }))
+  .filter((m) => m.content && m.content.length < 800);
 
   // We pass only catalog phones as allowed facts.
   const catalogFacts = candidatePhones.map((p) => ({
@@ -53,6 +60,9 @@ REQUIRED JSON SCHEMA:
   },
   "usedCatalogIds"?: string[]
 }
+
+CONVERSATION_HISTORY (most recent last):
+${JSON.stringify(history, null, 2)}
 
 USER_QUERY:
 ${JSON.stringify(userMessage)}

@@ -34,3 +34,7 @@ export interface ChatResponse {
   comparison?: ComparisonView;
   usedCatalogIds?: string[]; // for traceability/debug
 }
+
+export interface ChatRequest {
+  messages: ChatMessage[];
+}
