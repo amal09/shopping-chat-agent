@@ -82,16 +82,70 @@ export async function POST(req: Request) {
     // Follow-up handling: "this phone / tell me more"
     // If user asks follow-up and we have last used IDs, narrow candidates to that set.
     if (looksLikeFollowUp(message)) {
+      const repoAll = await repo.getAllPhones();
+
+      // Try last shown ids first
       const lastIds = extractLastUsedCatalogIds(messages);
-      if (lastIds.length) {
-        const all = await repo.getAllPhones();
-        const narrowed = all.filter((p) => lastIds.includes(p.id));
-        if (narrowed.length) {
-          // override candidates with last shown phones
-          candidates.splice(0, candidates.length, ...narrowed);
-        }
+
+      // If no ids, try resolving by name from the follow-up text
+      let target = null;
+      if (lastIds.length === 1) {
+        target = repoAll.find(p => p.id === lastIds[0]) ?? null;
+      } else if (!lastIds.length) {
+        target = resolvePhoneByName(repoAll, message);
+      }
+
+      // If multiple possible phones, ask which one
+      if (lastIds.length > 1) {
+        const shortlist = repoAll.filter(p => lastIds.includes(p.id));
+        return NextResponse.json({
+          mode: "clarify",
+          message: "Which phone do you want more details about?",
+          products: shortlist.map(p => ({
+            id: p.id,
+            title: `${p.brand} ${p.model}`,
+            priceInr: p.priceInr,
+            highlights: [
+              p.summary ?? "Summary not listed",
+              p.hasOis ? "OIS: Yes" : "OIS: Not listed",
+              p.batteryMah ? `Battery: ${p.batteryMah} mAh` : "Battery: Not listed",
+              p.chargingW ? `Charging: ${p.chargingW}W` : "Charging: Not listed",
+            ],
+          })),
+          usedCatalogIds: shortlist.map(p => p.id)
+        });
+      }
+
+      // If we found exactly one phone, return deterministic "more details"
+      if (target) {
+        return NextResponse.json({
+          mode: "recommend",
+          message: `More details for ${target.brand} ${target.model}:`,
+          products: [
+            {
+              id: target.id,
+              title: `${target.brand} ${target.model}`,
+              priceInr: target.priceInr,
+              highlights: [
+                target.summary ?? "Summary not listed",
+                target.os ? `OS: ${target.os}` : "OS: Not listed",
+                target.ramGb ? `RAM: ${target.ramGb} GB` : "RAM: Not listed",
+                target.storageGb ? `Storage: ${target.storageGb} GB` : "Storage: Not listed",
+                target.displayInches ? `Display: ${target.displayInches}"` : "Display: Not listed",
+                target.refreshRateHz ? `Refresh rate: ${target.refreshRateHz} Hz` : "Refresh rate: Not listed",
+                target.batteryMah ? `Battery: ${target.batteryMah} mAh` : "Battery: Not listed",
+                target.chargingW ? `Charging: ${target.chargingW}W` : "Charging: Not listed",
+                target.cameraPrimaryMp ? `Main camera: ${target.cameraPrimaryMp} MP` : "Main camera: Not listed",
+                target.hasOis ? "OIS: Yes" : "OIS: Not listed",
+                target.rating ? `Rating: ${target.rating}/5` : "Rating: Not listed",
+              ]
+            }
+          ],
+          usedCatalogIds: [target.id]
+        });
       }
     }
+
 
     // If nothing matched,
     if (candidates.length === 0) {

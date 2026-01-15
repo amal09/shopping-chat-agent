@@ -34,12 +34,12 @@ export default function ChatShell() {
   }, [messages.length, loading]);
 
   const apiMessages: ChatMessage[] = useMemo(() => {
-    // Convert UI messages into API messages (strip hidden catalog_ids marker if present)
     return messages.map((m) => ({
       role: m.role,
-      content: m.content.replace(/\n?\[catalog_ids:[^\]]+\]\s*$/i, "")
-    })) as ChatMessage[];
+      content: m.content   // 👈 KEEP catalog_ids for backend
+    }));
   }, [messages]);
+
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
