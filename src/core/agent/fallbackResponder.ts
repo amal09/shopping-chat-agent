@@ -34,6 +34,68 @@ function toDetailBullets(p: Phone): string[] {
   ];
 }
 
+function explainConcept(userMessage: string): string {
+  const t = (userMessage || "").toLowerCase();
+
+  // OIS vs EIS
+  if (t.includes("ois") && t.includes("eis")) {
+    return (
+      "OIS (Optical Image Stabilization) is hardware-based stabilization: the lens or sensor physically moves to counter hand shake. " +
+      "It helps a lot for sharper photos in low light and reduces motion blur.\n\n" +
+      "EIS (Electronic Image Stabilization) is software-based stabilization: the phone crops and aligns video frames to smooth motion. " +
+      "It’s mainly used for video and can slightly reduce quality due to cropping.\n\n" +
+      "In real use: OIS is great for night photos and steady shots, EIS is great for smoother handheld video. Phones that combine both usually perform best."
+    );
+  }
+
+  // AMOLED / OLED / LCD basics
+  if (t.includes("amoled")) {
+    return (
+      "AMOLED (Active Matrix OLED) is a display tech where each pixel emits its own light (no backlight). " +
+      "That’s why AMOLED can produce true blacks and very high contrast.\n\n" +
+      "How it feels in daily use: videos look punchy, dark mode can save battery (black pixels can be off), and phones can be thinner. " +
+      "Trade-offs: it’s usually more expensive, and in extreme long-term static usage there can be burn-in risk.\n\n" +
+      "For buyers: AMOLED is a strong choice if you watch a lot of content, use dark mode, or want premium contrast."
+    );
+  }
+
+  if (t.includes("oled")) {
+    return (
+      "OLED is a display technology where each pixel produces its own light, so it can turn fully off for true blacks and high contrast. " +
+      "AMOLED is a common smartphone implementation of OLED that uses an active-matrix control system for better responsiveness.\n\n" +
+      "Compared to LCD, OLED usually looks more contrasty and can be more power-efficient with dark themes. " +
+      "Potential downsides are higher cost and possible burn-in in rare long-term scenarios.\n\n" +
+      "For phones: OLED/AMOLED is generally considered the more premium display choice."
+    );
+  }
+
+  if (t.includes("ltpo")) {
+    return (
+      "LTPO (Low-Temperature Polycrystalline Oxide) is a display backplane technology that allows the screen to vary refresh rate more efficiently. " +
+      "This enables features like 1Hz–120Hz adaptive refresh.\n\n" +
+      "Practical benefit: smoother scrolling at high refresh rates when needed, and better battery life when showing static content (always-on display, reading, etc.).\n\n" +
+      "For buyers: LTPO matters most if you want a high refresh screen without a big battery hit."
+    );
+  }
+
+  if (t.includes("lcd") || t.includes("ips")) {
+    return (
+      "LCD (often IPS LCD) uses a backlight behind the screen. Pixels don’t emit light themselves, so blacks are typically more gray compared to OLED/AMOLED.\n\n" +
+      "Pros: LCD can be cheaper, has no burn-in risk, and can look very good with accurate colors. " +
+      "Cons: lower contrast and less “deep black” look than AMOLED.\n\n" +
+      "For buyers: a good LCD can still be great in budget phones, but AMOLED usually feels more premium for movies and dark themes."
+    );
+  }
+
+  // Default generic explain (always explain, never ask for more detail)
+  return (
+    "Here’s a simple explanation:\n\n" +
+    "• What it is: a feature/technology used in smartphones.\n" +
+    "• Why it matters: it affects real usage like camera quality, display experience, battery life, or performance.\n\n" +
+    "If you tell me whether you care more about photos, videos, gaming, or battery, I can also explain its impact in that specific context."
+  );
+}
+
 export function buildFallbackResponse(args: {
   modeHint: "recommend" | "compare" | "explain";
   userMessage: string;
@@ -45,7 +107,7 @@ export function buildFallbackResponse(args: {
   if (candidates.length === 1) {
     const p = candidates[0];
     return {
-      mode: "explain",
+      mode: "recommend",
       message: `More details about ${p.brand} ${p.model}:`,
       products: [
         {
@@ -59,27 +121,12 @@ export function buildFallbackResponse(args: {
     };
   }
 
-  // Explain (general): keep it general, not catalog-dependent
+  // Explain (general): always provide an explanation
   if (modeHint === "explain") {
-    const t = (userMessage || "").toLowerCase();
-
-    // Generic (model-free) explanation for stabilization
-    if (t.includes("ois") && t.includes("eis")) {
-      return {
-        mode: "explain",
-        message:
-          "OIS (Optical Image Stabilization) stabilizes using hardware (lens/sensor movement) and helps a lot in low light and for reducing photo blur. " +
-          "EIS (Electronic Image Stabilization) stabilizes using software by cropping/aligning frames, commonly used for smoother video. " +
-          "Many phones use both: OIS for photos/low-light, EIS for video smoothness.",
-        usedCatalogIds: candidates.map((p) => p.id)
-      };
-    }
-
     return {
       mode: "explain",
-      message:
-        "I can explain that. Ask in a bit more detail (e.g., 'Explain OIS vs EIS' or 'What is AMOLED vs OLED') and I’ll break it down clearly.",
-      usedCatalogIds: candidates.map((p) => p.id)
+      message: explainConcept(userMessage),
+      usedCatalogIds: [] // explain is model-free
     };
   }
 

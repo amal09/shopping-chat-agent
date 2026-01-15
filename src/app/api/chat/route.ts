@@ -14,6 +14,7 @@ import { extractVsPair, resolvePhoneByName } from "@/core/catalog/phoneResolver"
 type ChatRequestBody = {
   messages: ChatMessage[];
 };
+
 function wantsSingleResult(userText: string): boolean {
   const t = (userText || "").toLowerCase();
   return (
@@ -21,15 +22,13 @@ function wantsSingleResult(userText: string): boolean {
     t.includes("only one") ||
     t.includes("pick one") ||
     t.includes("just one") ||
-    t.match(/\bbest\b/) !== null && (t.includes("single") || t.includes("one"))
+    (t.match(/\bbest\b/) !== null && (t.includes("single") || t.includes("one")))
   );
 }
-
 
 function inferMode(userText: string): "recommend" | "compare" | "explain" {
   const t = (userText || "").toLowerCase();
 
-  // Explicit explain intent (strong signal)
   const explainWords = [
     "explain",
     "what is",
@@ -44,7 +43,6 @@ function inferMode(userText: string): "recommend" | "compare" | "explain" {
   ];
   if (explainWords.some((w) => t.includes(w))) return "explain";
 
-  // Explicit compare intent (strong signal)
   const compareWords = [
     "compare",
     "comparison",
@@ -58,18 +56,15 @@ function inferMode(userText: string): "recommend" | "compare" | "explain" {
   ];
   if (compareWords.some((w) => t.includes(w))) return "compare";
 
-  // Default
   return "recommend";
 }
 
 function extractJsonObject(text: string): string {
   const s = (text || "").trim();
 
-  // Handle ```json ... ```
   const fenced = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fenced?.[1]) return fenced[1].trim();
 
-  // Otherwise, try grabbing the first {...} block
   const start = s.indexOf("{");
   const end = s.lastIndexOf("}");
   if (start >= 0 && end > start) return s.slice(start, end + 1);
@@ -103,22 +98,19 @@ async function callGeminiAndValidate(args: {
       return buildFallbackResponse({ modeHint, userMessage, candidates });
     }
 
-    // Always inject usedCatalogIds for traceability
-    const finalResponse = {
+    const finalResponse: any = {
       ...validated.data,
       usedCatalogIds: validated.data.usedCatalogIds?.length
         ? validated.data.usedCatalogIds
         : candidates.map((p: any) => p.id)
     };
-    
-    const single = wantsSingleResult(userMessage);
 
+    const single = wantsSingleResult(userMessage);
     if (single && finalResponse.mode === "recommend" && Array.isArray(finalResponse.products)) {
       finalResponse.products = finalResponse.products.slice(0, 1);
-      finalResponse.usedCatalogIds = finalResponse.products.map(p => p.id);
+      finalResponse.usedCatalogIds = finalResponse.products.map((p: any) => p.id);
       finalResponse.comparison = undefined;
     }
-
 
     return finalResponse;
   } catch {
@@ -148,7 +140,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ IMPORTANT: infer mode BEFORE catalog fallback checks
+    // infer mode early
     const modeHint = inferMode(message);
 
     // 2) Deterministic parsing + retrieval
@@ -229,32 +221,47 @@ export async function POST(req: Request) {
       }
     }
 
-    // ✅ KEY FIX: If candidates are empty AND mode is explain, still call Gemini
+    /**
+     * ✅ CRITICAL FIX:
+     * For explain-mode when there are 0 candidates, DO NOT enforce JSON.
+     * Ask Gemini for plain text and wrap it into our JSON response.
+     * This prevents fallback from triggering on non-JSON outputs.
+     */
     if (candidates.length === 0 && modeHint === "explain") {
-      const prompt = buildAgentPrompt({
-        userMessage: message,
-        modeHint,
-        candidatePhones: [], // explain mode can work without catalog candidates
-        history: messages
-      });
+      const explainPrompt = `
+You are a mobile shopping assistant.
+Explain the topic clearly and directly (150–220 words). No follow-up questions.
 
-      const finalResponse = await callGeminiAndValidate({
-        prompt,
-        modeHint,
-        userMessage: message,
-        candidates: []
-      });
+Topic: ${message}
 
-      // explain should not claim catalog ids
-      return NextResponse.json({
-        ...finalResponse,
-        usedCatalogIds: []
-      });
+Include:
+- What it is
+- How it works (simple)
+- Pros and cons
+- Practical impact in smartphones
+
+Do NOT mention "catalog" or ask the user to clarify.
+`.trim();
+
+      try {
+        const model = getGeminiModel();
+        const resp = await model.generateContent(explainPrompt);
+        const text = resp.response.text().trim();
+
+        return NextResponse.json({
+          mode: "explain",
+          message: text,
+          usedCatalogIds: []
+        });
+      } catch {
+        // If Gemini fails, use our explain fallback (which we will fix below)
+        return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates: [] }));
+      }
     }
 
     // If nothing matched (recommend/compare cases)
     if (candidates.length === 0) {
-      // If user asked for brand + budget, give nearest brand options slightly above budget
+      // brand+budget nearest option
       if (parsed.budgetInr && parsed.brandIncludes?.length) {
         const all = await repo.getAllPhones();
         const brand = parsed.brandIncludes[0].toLowerCase();
@@ -290,7 +297,6 @@ export async function POST(req: Request) {
         }
       }
 
-      // Default fallback
       return NextResponse.json({
         mode: "clarify",
         message:
@@ -299,7 +305,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3) Gemini prompt (grounded)
+    // 3) Gemini prompt (grounded for recommend/compare)
     const prompt = buildAgentPrompt({
       userMessage: message,
       modeHint,
@@ -308,14 +314,14 @@ export async function POST(req: Request) {
     });
 
     // 4) Call Gemini + validate output; fallback on ANY failure
-    const finalResponse = await callGeminiAndValidate({
+    const finalResponse: any = await callGeminiAndValidate({
       prompt,
       modeHint,
       userMessage: message,
       candidates
     });
 
-    // If explain, do not attach usedCatalogIds unless model provided it (but we override anyway)
+    // For explain (should be rare here), don't claim catalog ids
     if (finalResponse.mode === "explain") {
       return NextResponse.json({
         ...finalResponse,

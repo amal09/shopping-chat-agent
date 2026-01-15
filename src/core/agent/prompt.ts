@@ -38,7 +38,10 @@ export function buildAgentPrompt(args: {
 
   const rulesForExplain = `
 - You may answer general mobile concepts (e.g., OIS vs EIS, AMOLED, refresh rate) even if CATALOG_FACTS is empty.
+- Always explain the concept directly when asked.
+- Do NOT respond by asking the user for more detail.
 - Do NOT invent phone models, prices, or specs.
+- Prefer practical explanation style suitable for buyers (real usage impact).
 - If the user asks about a specific phone's spec that is missing from CATALOG_FACTS, say it's not available in our catalog.
 `.trim();
 
@@ -63,6 +66,9 @@ TASK:
 If mode is "explain":
 - Provide a clear educational explanation (120–180 words).
 - Use short paragraphs or bullet points.
+- Do NOT ask follow-up questions.
+- Do NOT ask the user to clarify unless the query is truly incomplete (example: "Explain this").
+- Assume the user wants a general buyer-friendly explanation.
 - Cover if possible:
   • What it is
   • How it works
