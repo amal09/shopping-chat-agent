@@ -1,4 +1,4 @@
-import type { ProductCard as ProductCardType } from "@/core/types/chat";
+import type { ChatProductCard as ProductCardType } from "@/core/types/chat";
 import { formatInr } from "@/core/utils/money";
 
 export default function ProductCard({ product }: { product: ProductCardType }) {
