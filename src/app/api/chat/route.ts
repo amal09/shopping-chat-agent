@@ -14,6 +14,17 @@ import { extractVsPair, resolvePhoneByName } from "@/core/catalog/phoneResolver"
 type ChatRequestBody = {
   messages: ChatMessage[];
 };
+function wantsSingleResult(userText: string): boolean {
+  const t = (userText || "").toLowerCase();
+  return (
+    t.includes("single best") ||
+    t.includes("only one") ||
+    t.includes("pick one") ||
+    t.includes("just one") ||
+    t.match(/\bbest\b/) !== null && (t.includes("single") || t.includes("one"))
+  );
+}
+
 
 function inferMode(userText: string): "recommend" | "compare" | "explain" {
   const t = (userText || "").toLowerCase();
@@ -51,8 +62,6 @@ function inferMode(userText: string): "recommend" | "compare" | "explain" {
   return "recommend";
 }
 
-
-
 function extractJsonObject(text: string): string {
   const s = (text || "").trim();
 
@@ -68,13 +77,60 @@ function extractJsonObject(text: string): string {
   return s;
 }
 
+async function callGeminiAndValidate(args: {
+  prompt: string;
+  modeHint: "recommend" | "compare" | "explain";
+  userMessage: string;
+  candidates: any[];
+}) {
+  const { prompt, modeHint, userMessage, candidates } = args;
+
+  try {
+    const model = getGeminiModel();
+    const resp = await model.generateContent(prompt);
+    const text = resp.response.text().trim();
+    const jsonText = extractJsonObject(text);
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(jsonText);
+    } catch {
+      return buildFallbackResponse({ modeHint, userMessage, candidates });
+    }
+
+    const validated = ChatResponseSchema.safeParse(parsedJson);
+    if (!validated.success) {
+      return buildFallbackResponse({ modeHint, userMessage, candidates });
+    }
+
+    // Always inject usedCatalogIds for traceability
+    const finalResponse = {
+      ...validated.data,
+      usedCatalogIds: validated.data.usedCatalogIds?.length
+        ? validated.data.usedCatalogIds
+        : candidates.map((p: any) => p.id)
+    };
+    
+    const single = wantsSingleResult(userMessage);
+
+    if (single && finalResponse.mode === "recommend" && Array.isArray(finalResponse.products)) {
+      finalResponse.products = finalResponse.products.slice(0, 1);
+      finalResponse.usedCatalogIds = finalResponse.products.map(p => p.id);
+      finalResponse.comparison = undefined;
+    }
+
+
+    return finalResponse;
+  } catch {
+    return buildFallbackResponse({ modeHint, userMessage, candidates });
+  }
+}
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as ChatRequestBody;
     const messages = Array.isArray(body?.messages) ? body.messages : [];
     const message = getLastUserMessage(messages);
-
 
     if (!message) {
       return NextResponse.json(
@@ -92,6 +148,9 @@ export async function POST(req: Request) {
       });
     }
 
+    // ✅ IMPORTANT: infer mode BEFORE catalog fallback checks
+    const modeHint = inferMode(message);
+
     // 2) Deterministic parsing + retrieval
     const repo = new CatalogJsonRepo();
     const parsed = parseUserQuery(message);
@@ -99,28 +158,23 @@ export async function POST(req: Request) {
     let candidates = results.map((r) => r.phone);
 
     // Follow-up handling: "this phone / tell me more"
-    // If user asks follow-up and we have last used IDs, narrow candidates to that set.
     if (looksLikeFollowUp(message)) {
       const repoAll = await repo.getAllPhones();
-
-      // Try last shown ids first
       const lastIds = extractLastUsedCatalogIds(messages);
 
-      // If no ids, try resolving by name from the follow-up text
       let target = null;
       if (lastIds.length === 1) {
-        target = repoAll.find(p => p.id === lastIds[0]) ?? null;
+        target = repoAll.find((p) => p.id === lastIds[0]) ?? null;
       } else if (!lastIds.length) {
         target = resolvePhoneByName(repoAll, message);
       }
 
-      // If multiple possible phones, ask which one
       if (lastIds.length > 1) {
-        const shortlist = repoAll.filter(p => lastIds.includes(p.id));
+        const shortlist = repoAll.filter((p) => lastIds.includes(p.id));
         return NextResponse.json({
           mode: "clarify",
           message: "Which phone do you want more details about?",
-          products: shortlist.map(p => ({
+          products: shortlist.map((p) => ({
             id: p.id,
             title: `${p.brand} ${p.model}`,
             priceInr: p.priceInr,
@@ -128,14 +182,13 @@ export async function POST(req: Request) {
               p.summary ?? "Summary not listed",
               p.hasOis ? "OIS: Yes" : "OIS: Not listed",
               p.batteryMah ? `Battery: ${p.batteryMah} mAh` : "Battery: Not listed",
-              p.chargingW ? `Charging: ${p.chargingW}W` : "Charging: Not listed",
-            ],
+              p.chargingW ? `Charging: ${p.chargingW}W` : "Charging: Not listed"
+            ]
           })),
-          usedCatalogIds: shortlist.map(p => p.id)
+          usedCatalogIds: shortlist.map((p) => p.id)
         });
       }
 
-      // If we found exactly one phone, return deterministic "more details"
       if (target) {
         return NextResponse.json({
           mode: "recommend",
@@ -156,7 +209,7 @@ export async function POST(req: Request) {
                 target.chargingW ? `Charging: ${target.chargingW}W` : "Charging: Not listed",
                 target.cameraPrimaryMp ? `Main camera: ${target.cameraPrimaryMp} MP` : "Main camera: Not listed",
                 target.hasOis ? "OIS: Yes" : "OIS: Not listed",
-                target.rating ? `Rating: ${target.rating}/5` : "Rating: Not listed",
+                target.rating ? `Rating: ${target.rating}/5` : "Rating: Not listed"
               ]
             }
           ],
@@ -165,8 +218,41 @@ export async function POST(req: Request) {
       }
     }
 
+    // If message is "A vs B", resolve exact phones from catalog
+    const allPhones = await repo.getAllPhones();
+    const pair = extractVsPair(message);
+    if (pair) {
+      const left = resolvePhoneByName(allPhones, pair.left);
+      const right = resolvePhoneByName(allPhones, pair.right);
+      if (left && right) {
+        candidates.splice(0, candidates.length, left, right);
+      }
+    }
 
-    // If nothing matched,
+    // ✅ KEY FIX: If candidates are empty AND mode is explain, still call Gemini
+    if (candidates.length === 0 && modeHint === "explain") {
+      const prompt = buildAgentPrompt({
+        userMessage: message,
+        modeHint,
+        candidatePhones: [], // explain mode can work without catalog candidates
+        history: messages
+      });
+
+      const finalResponse = await callGeminiAndValidate({
+        prompt,
+        modeHint,
+        userMessage: message,
+        candidates: []
+      });
+
+      // explain should not claim catalog ids
+      return NextResponse.json({
+        ...finalResponse,
+        usedCatalogIds: []
+      });
+    }
+
+    // If nothing matched (recommend/compare cases)
     if (candidates.length === 0) {
       // If user asked for brand + budget, give nearest brand options slightly above budget
       if (parsed.budgetInr && parsed.brandIncludes?.length) {
@@ -179,11 +265,13 @@ export async function POST(req: Request) {
 
         if (brandPhones.length > 0) {
           const cheapest = brandPhones[0];
-
-          // show "nearest" brand option above budget (like A55 at 29999)
           return NextResponse.json({
             mode: "clarify",
-            message: `I couldn’t find any ${parsed.brandIncludes[0]} phones under ₹${parsed.budgetInr.toLocaleString("en-IN")} in the current catalog. The closest option is ${cheapest.brand} ${cheapest.model} at ₹${cheapest.priceInr.toLocaleString("en-IN")}. If you want, I can also suggest the best alternatives under your budget.`,
+            message: `I couldn’t find any ${parsed.brandIncludes[0]} phones under ₹${parsed.budgetInr.toLocaleString(
+              "en-IN"
+            )} in the current catalog. The closest option is ${cheapest.brand} ${cheapest.model} at ₹${cheapest.priceInr.toLocaleString(
+              "en-IN"
+            )}. If you want, I can also suggest the best alternatives under your budget.`,
             products: [
               {
                 id: cheapest.id,
@@ -202,7 +290,7 @@ export async function POST(req: Request) {
         }
       }
 
-      // Default fallback (no brand or no phones at all)
+      // Default fallback
       return NextResponse.json({
         mode: "clarify",
         message:
@@ -211,20 +299,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // If message is "A vs B", resolve to exact phones from catalog
-    const allPhones = await repo.getAllPhones();
-    const pair = extractVsPair(message);
-    if (pair) {
-      const left = resolvePhoneByName(allPhones, pair.left);
-      const right = resolvePhoneByName(allPhones, pair.right);
-      if (left && right) {
-        candidates.splice(0, candidates.length, left, right);
-      }
-    }
-    
-
     // 3) Gemini prompt (grounded)
-    const modeHint = inferMode(message);
     const prompt = buildAgentPrompt({
       userMessage: message,
       modeHint,
@@ -232,51 +307,24 @@ export async function POST(req: Request) {
       history: messages
     });
 
-
     // 4) Call Gemini + validate output; fallback on ANY failure
-    try {
-      console.log("[chat] modeHint:", modeHint);
-      console.log("[chat] candidates:", candidates.map(c => c.id));
+    const finalResponse = await callGeminiAndValidate({
+      prompt,
+      modeHint,
+      userMessage: message,
+      candidates
+    });
 
-      const model = getGeminiModel();
-      const resp = await model.generateContent(prompt);
-      const text = resp.response.text().trim();
-      const jsonText = extractJsonObject(text);
-
-      let parsedJson: unknown;
-      try {
-        parsedJson = JSON.parse(jsonText);
-      } catch {
-        console.log("[chat] fallback: invalid JSON from model");
-        console.log("[chat] raw (first 300):", text.slice(0, 300));
-        return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
-      }
-
-
-
-      const validated = ChatResponseSchema.safeParse(parsedJson);
-      if (!validated.success) {
-        console.log("[chat] fallback: schema validation failed", validated.error.issues);
-        return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
-      }
-
-
-      // Always inject usedCatalogIds for traceability (even if model forgot it)
-      const finalResponse = {
-        ...validated.data,
-        usedCatalogIds: validated.data.usedCatalogIds?.length
-          ? validated.data.usedCatalogIds
-          : candidates.map((p) => p.id)
-      };
-
-      return NextResponse.json(finalResponse);
-    } catch(e: any) {
-      // Gemini API error (quota/rate-limit/network/etc.)
-      console.log("[chat] fallback: Gemini call failed", e?.message || e);
-      return NextResponse.json(buildFallbackResponse({ modeHint, userMessage: message, candidates }));
+    // If explain, do not attach usedCatalogIds unless model provided it (but we override anyway)
+    if (finalResponse.mode === "explain") {
+      return NextResponse.json({
+        ...finalResponse,
+        usedCatalogIds: []
+      });
     }
+
+    return NextResponse.json(finalResponse);
   } catch (err: any) {
-    // Errors in request parsing, catalog loading, etc.
     return NextResponse.json(
       {
         mode: "clarify",
