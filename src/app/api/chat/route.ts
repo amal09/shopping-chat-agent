@@ -16,22 +16,41 @@ type ChatRequestBody = {
 };
 
 function inferMode(userText: string): "recommend" | "compare" | "explain" {
-  const t = userText.toLowerCase();
+  const t = (userText || "").toLowerCase();
 
-  // Explain should have highest priority
-  if (
-    t.includes("explain") ||
-    t.includes("what is") ||
-    t.includes("difference") ||
-    t.includes("ois") ||
-    t.includes("eis")
-  ) return "explain";
+  // Explicit explain intent (strong signal)
+  const explainWords = [
+    "explain",
+    "what is",
+    "what's",
+    "whats",
+    "define",
+    "meaning of",
+    "difference between",
+    "diff between",
+    "how does",
+    "how do"
+  ];
+  if (explainWords.some((w) => t.includes(w))) return "explain";
 
-  // Compare next
-  if (t.includes("compare") || t.includes(" vs ") || t.includes("vs")) return "compare";
+  // Explicit compare intent (strong signal)
+  const compareWords = [
+    "compare",
+    "comparison",
+    "vs",
+    "v/s",
+    "versus",
+    "against",
+    "better than",
+    "which is better",
+    "difference"
+  ];
+  if (compareWords.some((w) => t.includes(w))) return "compare";
 
+  // Default
   return "recommend";
 }
+
 
 
 function extractJsonObject(text: string): string {
@@ -77,7 +96,7 @@ export async function POST(req: Request) {
     const repo = new CatalogJsonRepo();
     const parsed = parseUserQuery(message);
     const results = await searchCatalog(repo, parsed, 5);
-    const candidates = results.map((r) => r.phone);
+    let candidates = results.map((r) => r.phone);
 
     // Follow-up handling: "this phone / tell me more"
     // If user asks follow-up and we have last used IDs, narrow candidates to that set.

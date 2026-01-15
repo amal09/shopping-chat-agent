@@ -1,40 +1,39 @@
-import type { Phone } from "./phone";
-
 export type ChatRole = "user" | "assistant";
 
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+
+  // ✅ Robust follow-up context (avoid hiding ids inside content strings)
+  meta?: {
+    usedCatalogIds?: string[];
+  };
 }
 
-export type ResponseMode = "recommend" | "compare" | "explain" | "clarify" | "refuse";
+export type ChatMode = "recommend" | "compare" | "explain" | "clarify" | "refuse";
 
-export interface ProductCard {
+export interface ChatProductCard {
   id: string;
-  title: string;          // e.g., "Google Pixel 8a"
+  title: string;
   priceInr: number;
-  highlights: string[];   // bullets shown in UI
+  highlights: string[];
 }
 
-export interface ComparisonRow {
-  label: string;          // e.g., "Battery"
-  values: string[];       // one per product in same order
+export interface ChatComparisonRow {
+  label: string;
+  values: string[];
 }
 
-export interface ComparisonView {
+export interface ChatComparison {
   productIds: string[];
-  headers: string[];      // product names
-  rows: ComparisonRow[];
+  headers: string[];
+  rows: ChatComparisonRow[];
 }
 
 export interface ChatResponse {
-  mode: ResponseMode;
+  mode: ChatMode;
   message: string;
-  products?: ProductCard[];
-  comparison?: ComparisonView;
-  usedCatalogIds?: string[]; // for traceability/debug
-}
-
-export interface ChatRequest {
-  messages: ChatMessage[];
+  products?: ChatProductCard[];
+  comparison?: ChatComparison;
+  usedCatalogIds?: string[];
 }

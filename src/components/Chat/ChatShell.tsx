@@ -1,20 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatResponse, ChatMessage } from "@/core/types/chat";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 
 type UiMessage =
   | { role: "user"; content: string }
-  | { role: "assistant"; content: string; response?: ChatResponse };
+  | { role: "assistant"; content: string; response?: ChatResponse; meta?: { usedCatalogIds?: string[] } };
 
 const QUICK_PROMPTS = [
-  'Best camera phone under ₹25k',
-  'Battery king with fast charging around ₹15k',
-  'Compare Pixel 8a vs OnePlus 12R',
-  'Explain OIS vs EIS',
-  'Show me Samsung phones only under ₹25k'
+  "Best camera phone under ₹25k",
+  "Battery king with fast charging around ₹15k",
+  "Compare Pixel 8a vs OnePlus 12R",
+  "Explain OIS vs EIS",
+  "Show me Samsung phones only under ₹25k"
 ];
 
 export default function ChatShell() {
@@ -28,31 +28,36 @@ export default function ChatShell() {
   const [loading, setLoading] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<UiMessage[]>(messages);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, loading]);
 
-  const apiMessages: ChatMessage[] = useMemo(() => {
-    return messages.map((m) => ({
-      role: m.role,
-      content: m.content   // 👈 KEEP catalog_ids for backend
-    }));
+  useEffect(() => {
+    messagesRef.current = messages;
   }, [messages]);
-
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
 
-    // optimistic add user message
+    // ✅ snapshot includes meta
+    const snapshot = messagesRef.current.map((m) => ({
+      role: m.role,
+      content: m.content,
+      meta: (m as any).meta
+    })) as ChatMessage[];
+
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setLoading(true);
 
     try {
       const payload = {
-        messages: [...apiMessages, { role: "user", content: trimmed }]
+        messages: [...snapshot, { role: "user", content: trimmed }]
       };
+
+      console.log("payload messages (tail):", payload.messages.slice(-4));
 
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -62,15 +67,18 @@ export default function ChatShell() {
 
       const data = (await res.json()) as ChatResponse;
 
-      // carry usedCatalogIds forward invisibly for follow-ups
-      const marker = data.usedCatalogIds?.length ? `\n[catalog_ids:${data.usedCatalogIds.join(",")}]` : "";
+      // (Optional) Keep marker in content for debugging, but not required anymore
+      const marker = data.usedCatalogIds?.length
+        ? `\n[catalog_ids:${data.usedCatalogIds.join(",")}]`
+        : "";
 
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: (data.message || "Here are the results.") + marker,
-          response: data
+          content: `${data.message || "Here are the results."}${marker}`.trim(),
+          response: data,
+          meta: { usedCatalogIds: data.usedCatalogIds || [] }
         }
       ]);
     } catch {
