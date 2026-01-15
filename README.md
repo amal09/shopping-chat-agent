@@ -34,7 +34,7 @@ Built with **Next.js (App Router)**, **TypeScript**, **Google Gemini**, and a **
 
 - **Deployment Link:** https://shopping-chat-agent-mauve.vercel.app/
 - **GitHub Repo:** https://github.com/amal09/shopping-chat-agent
-- **Demo Video (optional):** https://drive.google.com/drive/u/0/my-drive
+- **Demo Video:** https://drive.google.com/drive/u/0/my-drive
 
 ---
 
