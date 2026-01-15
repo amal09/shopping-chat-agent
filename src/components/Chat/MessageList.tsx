@@ -27,7 +27,7 @@ export default function MessageList({ messages, loading }: { messages: UiMessage
 
             {m.role === "assistant" && m.response?.comparison ? (
               <div style={{ marginTop: 10 }}>
-                <ComparisonTable comparison={m.response.comparison} />
+                <ComparisonTable comparison={m.response?.comparison} />
               </div>
             ) : null}
           </div>

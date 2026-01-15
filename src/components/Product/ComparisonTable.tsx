@@ -1,6 +1,12 @@
-import type { ComparisonView } from "@/core/types/chat";
+import type { ChatComparison } from "@/core/types/chat";
 
-export default function ComparisonTable({ comparison }: { comparison: ComparisonView }) {
+export default function ComparisonTable({
+  comparison,
+}: {
+  comparison?: ChatComparison;
+}) {
+  if (!comparison) return null;
+
   return (
     <div className="tableWrap">
       <table>
